@@ -357,11 +357,19 @@ impl ScanContext<'_, '_> {
     /// use crate::modules::protos::my_module::MyModuleProto;
     /// let module_data: MyModuleProto = ctx.module_data::<MyModuleProto>()
     /// ```
+    #[allow(
+        dead_code,
+        reason = "used only by modules disabled in the Impresari build"
+    )]
     pub(crate) fn module_output<T: MessageFull>(&self) -> Option<&T> {
         let m = self.module_outputs.get(T::descriptor().full_name())?.as_ref();
         <dyn MessageDyn>::downcast_ref(m)
     }
 
+    #[allow(
+        dead_code,
+        reason = "used only by the console module disabled in the Impresari build"
+    )]
     pub(crate) fn console_log(&mut self, message: String) {
         if let Some(console_log) = &mut self.console_log {
             console_log(message)
