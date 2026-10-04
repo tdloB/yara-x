@@ -1,0 +1,77 @@
+name: Impresari upstream maintenance
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: impresari-upstream-maintenance
+  cancel-in-progress: false
+
+jobs:
+  propose-upstream-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out maintained fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch authenticated upstream identity
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/VirusTotal/yara-x.git
+          git fetch --no-tags upstream main
+          echo "sha=$(git rev-parse upstream/main)" >> "$GITHUB_OUTPUT"
+          echo "fork_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare auditable update branch
+        if: steps.upstream.outputs.needs_sync == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="impresari/upstream-${UPSTREAM_SHA:0:12}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --force-create "$branch"
+          if ! git merge --no-edit "$UPSTREAM_SHA"; then
+            git merge --abort || true
+            gh issue create \
+              --title "Upstream synchronization conflict at ${UPSTREAM_SHA:0:12}" \
+              --body "Automated synchronization could not merge upstream commit \`${UPSTREAM_SHA}\`. The maintained candidate remains pinned and is not production-admitted."
+            exit 1
+          fi
+          git push --force-with-lease origin "$branch"
+          if ! gh pr view "$branch" >/dev/null 2>&1; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "Sync YARA-X upstream ${UPSTREAM_SHA:0:12}" \
+              --body "Automated upstream candidate from \`VirusTotal/yara-x@${UPSTREAM_SHA}\`. This pull request must pass Impresari qualification before merge and does not change any production pin."
+          fi
+      - name: Record current identity
+        shell: bash
+        run: |
+          {
+            echo "### Impresari upstream maintenance"
+            echo "- Fork: \`${{ steps.upstream.outputs.fork_sha }}\`"
+            echo "- Upstream: \`${{ steps.upstream.outputs.sha }}\`"
+            echo "- Checked: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`"
+          } >> "$GITHUB_STEP_SUMMARY"

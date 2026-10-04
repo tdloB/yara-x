@@ -1,0 +1,54 @@
+name: Impresari engine qualification
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  locked-source-assurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Verify formatting
+        run: cargo fmt --all --check
+
+      - name: Verify CLI compiles without warnings
+        env:
+          RUSTFLAGS: -Dwarnings
+        run: cargo check --locked -p yara-x-cli
+
+      - name: Run CLI tests
+        run: cargo test --locked -p yara-x-cli
+
+      - name: Install pinned RustSec client
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Deny vulnerabilities and dependency warnings
+        run: cargo audit --deny warnings
+
+      - name: Emit candidate identity
+        shell: bash
+        run: |
+          {
+            echo "### Impresari engine candidate"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Cargo.lock SHA-256: \`$(sha256sum Cargo.lock | cut -d' ' -f1)\`"
+            echo "- Production admitted: \`false\`"
+          } >> "$GITHUB_STEP_SUMMARY"
