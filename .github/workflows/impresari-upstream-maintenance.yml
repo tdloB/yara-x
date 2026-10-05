@@ -66,7 +66,7 @@ jobs:
               --title "Sync YARA-X upstream ${UPSTREAM_SHA:0:12}" \
               --body "Automated upstream candidate from \`VirusTotal/yara-x@${UPSTREAM_SHA}\`. Branch protection requires Impresari qualification before merge, and this does not change any production pin."
           fi
-          gh pr merge "$branch" --auto --merge
+          gh pr merge "$branch" --auto --squash
       - name: Record current identity
         shell: bash
         run: |
