@@ -71,6 +71,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
           SOURCE_DATE_EPOCH: "1791158480"
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --locked --profile release-lto -p yara-x-cli
 
       - name: Smoke test exact executable
@@ -79,6 +80,11 @@ jobs:
           set -euo pipefail
           test -f target/release-lto/yr
           test ! -L target/release-lto/yr
+          test "$(file --brief target/release-lto/yr)" = "$(file --brief target/release-lto/yr | sed 's/dynamically linked/statically linked/')"
+          if readelf -l target/release-lto/yr | grep -q 'Requesting program interpreter'; then
+            echo 'candidate unexpectedly requires a dynamic program interpreter' >&2
+            exit 1
+          fi
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
           printf '%s\n' \
@@ -132,7 +138,7 @@ jobs:
             --arg runtime_archive_sha256 "$runtime_archive_sha256" \
             --arg runtime_archive_bytes "$runtime_archive_bytes" \
             --arg target "$TARGET" \
-            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.1.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:$target,rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,runtime_archive:$runtime_archive,runtime_archive_sha256:$runtime_archive_sha256,runtime_archive_bytes:$runtime_archive_bytes,production_admitted:false,safety_claimed:false}' \
+            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.2.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:$target,rust_toolchain:"1.96.0",profile:"release-lto",features:[],linkage:"static",executable_sha256:$executable,executable_bytes:$bytes,runtime_archive:$runtime_archive,runtime_archive_sha256:$runtime_archive_sha256,runtime_archive_bytes:$runtime_archive_bytes,production_admitted:false,safety_claimed:false}' \
             > candidate/engine-candidate.json
           (cd candidate && sha256sum LICENSE engine-candidate.json "$runtime_archive" yr > SHA256SUMS)
           test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 5
@@ -201,7 +207,7 @@ jobs:
             --arg runtime_archive_sha256 "$EXPECTED_RUNTIME_ARCHIVE_SHA256" \
             --arg runtime_archive_bytes "$EXPECTED_RUNTIME_ARCHIVE_BYTES" \
             --arg target "$TARGET" \
-            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.1.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .target == $target and .executable_sha256 == $executable and .executable_bytes == $bytes and .runtime_archive == $runtime_archive and .runtime_archive_sha256 == $runtime_archive_sha256 and .runtime_archive_bytes == $runtime_archive_bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
+            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.2.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .target == $target and .linkage == "static" and .executable_sha256 == $executable and .executable_bytes == $bytes and .runtime_archive == $runtime_archive and .runtime_archive_sha256 == $runtime_archive_sha256 and .runtime_archive_bytes == $runtime_archive_bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
             candidate/engine-candidate.json >/dev/null
           {
             echo '### Verified retained engine candidate'
