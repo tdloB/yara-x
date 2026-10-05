@@ -1,0 +1,174 @@
+name: Impresari retained engine candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: impresari-retained-engine-candidate
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_COMMIT: b45e110d010538b0f30f22fe05fd3c55d492f5cc
+  CANDIDATE_TREE: 2d90a97311327709b356d0044d8f6ebd2f50f629
+  CARGO_LOCK_SHA256: ef0e41365b01cf2a3c577ddd859f0da837f93e7b54cac385e41e3725be4af4c2
+  ARTIFACT_NAME: yara-x-1.21.0-impresari.1-linux-x86_64-engine-candidate
+
+jobs:
+  build:
+    name: Build exact non-production candidate
+    if: github.repository == 'tdloB/yara-x' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      executable_sha256: ${{ steps.identity.outputs.executable_sha256 }}
+      executable_bytes: ${{ steps.identity.outputs.executable_bytes }}
+    steps:
+      - name: Check out exact fork source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ env.CANDIDATE_COMMIT }}
+
+      - name: Verify immutable source identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          test "$(sha256sum Cargo.lock | cut -d' ' -f1)" = "$CARGO_LOCK_SHA256"
+          test -z "$(git status --short)"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.96.0
+
+      - name: Install pinned RustSec client
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Deny reachable vulnerabilities and dependency warnings
+        run: ruby scripts/impresari-audit-cli.rb
+
+      - name: Build locked module-free CLI
+        env:
+          CARGO_INCREMENTAL: "0"
+          SOURCE_DATE_EPOCH: "1791158480"
+        run: cargo build --locked --profile release-lto -p yara-x-cli
+
+      - name: Smoke test exact executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f target/release-lto/yr
+          test ! -L target/release-lto/yr
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          printf '%s\n' \
+            'rule impresari_candidate_smoke_v1 {' \
+            '  strings: $marker = "IMPRESARI_CANDIDATE_SMOKE_MARKER" ascii' \
+            '  condition: $marker' \
+            '}' > "$scratch/rule.yar"
+          printf '%s\n' 'IMPRESARI_CANDIDATE_SMOKE_MARKER' > "$scratch/input"
+          target/release-lto/yr compile --output "$scratch/rules.yarc" "$scratch/rule.yar"
+          target/release-lto/yr scan --compiled-rules --no-mmap --threads 1 --timeout 5 \
+            --output-format ndjson "$scratch/rules.yarc" "$scratch/input" > "$scratch/result.ndjson"
+          ruby -rjson -e '
+            rules = File.readlines(ARGV.fetch(0), chomp: true).reject(&:empty?)
+              .flat_map { |line| JSON.parse(line).fetch("rules", []) }
+              .map { |rule| rule.fetch("identifier") }
+            abort "candidate smoke mismatch: #{rules.inspect}" unless rules == ["impresari_candidate_smoke_v1"]
+          ' "$scratch/result.ndjson"
+
+      - name: Create bounded candidate package
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0755 candidate
+          install -m 0555 target/release-lto/yr candidate/yr
+          install -m 0444 LICENSE candidate/LICENSE
+          executable_sha256="$(sha256sum candidate/yr | cut -d' ' -f1)"
+          executable_bytes="$(wc -c < candidate/yr | tr -d ' ')"
+          printf '%s\n' \
+            "executable_sha256=$executable_sha256" \
+            "executable_bytes=$executable_bytes" >> "$GITHUB_OUTPUT"
+          jq -nS \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tree "$CANDIDATE_TREE" \
+            --arg lock "$CARGO_LOCK_SHA256" \
+            --arg executable "$executable_sha256" \
+            --arg bytes "$executable_bytes" \
+            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.0.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:"x86_64-unknown-linux-gnu",rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,production_admitted:false,safety_claimed:false}' \
+            > candidate/engine-candidate.json
+          (cd candidate && sha256sum LICENSE engine-candidate.json yr > SHA256SUMS)
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 0
+
+      - name: Upload seven-day non-release candidate
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Record non-claims
+        run: |
+          printf '%s\n' \
+            'retained_candidate_only=true' \
+            'production_admitted=false' \
+            'published_release=false' \
+            'safety_claimed=false' >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify without executing candidate
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download exact retained candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: candidate
+
+      - name: Verify members, identities, and non-claims
+        shell: bash
+        env:
+          EXPECTED_EXECUTABLE_SHA256: ${{ needs.build.outputs.executable_sha256 }}
+          EXPECTED_EXECUTABLE_BYTES: ${{ needs.build.outputs.executable_bytes }}
+        run: |
+          set -euo pipefail
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 0
+          diff -u <(printf '%s\n' LICENSE SHA256SUMS engine-candidate.json yr) \
+            <(find candidate -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          (cd candidate && sha256sum --check SHA256SUMS)
+          test "$(sha256sum candidate/yr | cut -d' ' -f1)" = "$EXPECTED_EXECUTABLE_SHA256"
+          test "$(wc -c < candidate/yr | tr -d ' ')" = "$EXPECTED_EXECUTABLE_BYTES"
+          jq -e \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tree "$CANDIDATE_TREE" \
+            --arg lock "$CARGO_LOCK_SHA256" \
+            --arg executable "$EXPECTED_EXECUTABLE_SHA256" \
+            --arg bytes "$EXPECTED_EXECUTABLE_BYTES" \
+            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.0.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .executable_sha256 == $executable and .executable_bytes == $bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
+            candidate/engine-candidate.json >/dev/null
+          {
+            echo '### Verified retained engine candidate'
+            echo "- Artifact ID: \`${{ needs.build.outputs.artifact_id }}\`"
+            echo "- Artifact digest: \`${{ needs.build.outputs.artifact_digest }}\`"
+            echo "- Executable SHA-256: \`$EXPECTED_EXECUTABLE_SHA256\`"
+            echo '- Candidate executed by verifier: `false`'
+            echo '- Production admitted: `false`'
+          } >> "$GITHUB_STEP_SUMMARY"
