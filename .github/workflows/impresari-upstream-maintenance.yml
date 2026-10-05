@@ -64,8 +64,9 @@ jobs:
               --base main \
               --head "$branch" \
               --title "Sync YARA-X upstream ${UPSTREAM_SHA:0:12}" \
-              --body "Automated upstream candidate from \`VirusTotal/yara-x@${UPSTREAM_SHA}\`. This pull request must pass Impresari qualification before merge and does not change any production pin."
+              --body "Automated upstream candidate from \`VirusTotal/yara-x@${UPSTREAM_SHA}\`. Branch protection requires Impresari qualification before merge, and this does not change any production pin."
           fi
+          gh pr merge "$branch" --auto --merge
       - name: Record current identity
         shell: bash
         run: |
