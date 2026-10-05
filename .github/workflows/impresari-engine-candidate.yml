@@ -2,25 +2,35 @@ name: Impresari retained engine candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Exact native Linux architecture to retain
+        required: true
+        default: x86_64
+        type: choice
+        options:
+          - x86_64
+          - aarch64
 
 permissions:
   contents: read
 
 concurrency:
-  group: impresari-retained-engine-candidate
+  group: impresari-retained-engine-candidate-${{ inputs.architecture }}
   cancel-in-progress: false
 
 env:
   CANDIDATE_COMMIT: b45e110d010538b0f30f22fe05fd3c55d492f5cc
   CANDIDATE_TREE: 2d90a97311327709b356d0044d8f6ebd2f50f629
   CARGO_LOCK_SHA256: ef0e41365b01cf2a3c577ddd859f0da837f93e7b54cac385e41e3725be4af4c2
-  ARTIFACT_NAME: yara-x-1.21.0-impresari.1-linux-x86_64-engine-candidate
+  TARGET: ${{ inputs.architecture }}-unknown-linux-gnu
+  ARTIFACT_NAME: yara-x-1.21.0-impresari.1-linux-${{ inputs.architecture }}-engine-candidate
 
 jobs:
   build:
     name: Build exact non-production candidate
     if: github.repository == 'tdloB/yara-x' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.architecture == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 60
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
@@ -104,7 +114,8 @@ jobs:
             --arg lock "$CARGO_LOCK_SHA256" \
             --arg executable "$executable_sha256" \
             --arg bytes "$executable_bytes" \
-            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.0.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:"x86_64-unknown-linux-gnu",rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,production_admitted:false,safety_claimed:false}' \
+            --arg target "$TARGET" \
+            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.0.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:$target,rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,production_admitted:false,safety_claimed:false}' \
             > candidate/engine-candidate.json
           (cd candidate && sha256sum LICENSE engine-candidate.json yr > SHA256SUMS)
           test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
@@ -162,7 +173,8 @@ jobs:
             --arg lock "$CARGO_LOCK_SHA256" \
             --arg executable "$EXPECTED_EXECUTABLE_SHA256" \
             --arg bytes "$EXPECTED_EXECUTABLE_BYTES" \
-            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.0.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .executable_sha256 == $executable and .executable_bytes == $bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
+            --arg target "$TARGET" \
+            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.0.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .target == $target and .executable_sha256 == $executable and .executable_bytes == $bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
             candidate/engine-candidate.json >/dev/null
           {
             echo '### Verified retained engine candidate'
