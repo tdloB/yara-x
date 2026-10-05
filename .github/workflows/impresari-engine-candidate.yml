@@ -37,6 +37,8 @@ jobs:
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
       executable_sha256: ${{ steps.identity.outputs.executable_sha256 }}
       executable_bytes: ${{ steps.identity.outputs.executable_bytes }}
+      runtime_archive_sha256: ${{ steps.identity.outputs.runtime_archive_sha256 }}
+      runtime_archive_bytes: ${{ steps.identity.outputs.runtime_archive_bytes }}
     steps:
       - name: Check out exact fork source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,6 +100,8 @@ jobs:
       - name: Create bounded candidate package
         id: identity
         shell: bash
+        env:
+          SOURCE_DATE_EPOCH: "1791158480"
         run: |
           set -euo pipefail
           install -d -m 0755 candidate
@@ -105,20 +109,33 @@ jobs:
           install -m 0444 LICENSE candidate/LICENSE
           executable_sha256="$(sha256sum candidate/yr | cut -d' ' -f1)"
           executable_bytes="$(wc -c < candidate/yr | tr -d ' ')"
+          runtime_archive="yara-x-1.21.0-impresari.1-linux-${{ inputs.architecture }}.tar.gz"
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            --format=posix --pax-option=delete=atime,delete=ctime \
+            -cf candidate/runtime.tar -C candidate yr
+          gzip -n -9 candidate/runtime.tar
+          mv candidate/runtime.tar.gz "candidate/$runtime_archive"
+          runtime_archive_sha256="$(sha256sum "candidate/$runtime_archive" | cut -d' ' -f1)"
+          runtime_archive_bytes="$(wc -c < "candidate/$runtime_archive" | tr -d ' ')"
           printf '%s\n' \
             "executable_sha256=$executable_sha256" \
-            "executable_bytes=$executable_bytes" >> "$GITHUB_OUTPUT"
+            "executable_bytes=$executable_bytes" \
+            "runtime_archive_sha256=$runtime_archive_sha256" \
+            "runtime_archive_bytes=$runtime_archive_bytes" >> "$GITHUB_OUTPUT"
           jq -nS \
             --arg commit "$CANDIDATE_COMMIT" \
             --arg tree "$CANDIDATE_TREE" \
             --arg lock "$CARGO_LOCK_SHA256" \
             --arg executable "$executable_sha256" \
             --arg bytes "$executable_bytes" \
+            --arg runtime_archive "$runtime_archive" \
+            --arg runtime_archive_sha256 "$runtime_archive_sha256" \
+            --arg runtime_archive_bytes "$runtime_archive_bytes" \
             --arg target "$TARGET" \
-            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.0.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:$target,rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,production_admitted:false,safety_claimed:false}' \
+            '{schema_name:"impresari-yara-x-engine-candidate",schema_version:"1.1.0",repository:"https://github.com/tdloB/yara-x",source_commit:$commit,source_tree:$tree,cargo_lock_sha256:$lock,target:$target,rust_toolchain:"1.96.0",profile:"release-lto",features:[],executable_sha256:$executable,executable_bytes:$bytes,runtime_archive:$runtime_archive,runtime_archive_sha256:$runtime_archive_sha256,runtime_archive_bytes:$runtime_archive_bytes,production_admitted:false,safety_claimed:false}' \
             > candidate/engine-candidate.json
-          (cd candidate && sha256sum LICENSE engine-candidate.json yr > SHA256SUMS)
-          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
+          (cd candidate && sha256sum LICENSE engine-candidate.json "$runtime_archive" yr > SHA256SUMS)
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 5
           test "$(find candidate -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 0
 
       - name: Upload seven-day non-release candidate
@@ -158,29 +175,40 @@ jobs:
         env:
           EXPECTED_EXECUTABLE_SHA256: ${{ needs.build.outputs.executable_sha256 }}
           EXPECTED_EXECUTABLE_BYTES: ${{ needs.build.outputs.executable_bytes }}
+          EXPECTED_RUNTIME_ARCHIVE_SHA256: ${{ needs.build.outputs.runtime_archive_sha256 }}
+          EXPECTED_RUNTIME_ARCHIVE_BYTES: ${{ needs.build.outputs.runtime_archive_bytes }}
         run: |
           set -euo pipefail
-          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4
+          runtime_archive="yara-x-1.21.0-impresari.1-linux-${{ inputs.architecture }}.tar.gz"
+          test "$(find candidate -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 5
           test "$(find candidate -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 0
-          diff -u <(printf '%s\n' LICENSE SHA256SUMS engine-candidate.json yr) \
+          diff -u <(printf '%s\n' LICENSE SHA256SUMS engine-candidate.json "$runtime_archive" yr) \
             <(find candidate -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
           (cd candidate && sha256sum --check SHA256SUMS)
           test "$(sha256sum candidate/yr | cut -d' ' -f1)" = "$EXPECTED_EXECUTABLE_SHA256"
           test "$(wc -c < candidate/yr | tr -d ' ')" = "$EXPECTED_EXECUTABLE_BYTES"
+          test "$(sha256sum "candidate/$runtime_archive" | cut -d' ' -f1)" = "$EXPECTED_RUNTIME_ARCHIVE_SHA256"
+          test "$(wc -c < "candidate/$runtime_archive" | tr -d ' ')" = "$EXPECTED_RUNTIME_ARCHIVE_BYTES"
+          test "$(tar -tzf "candidate/$runtime_archive")" = yr
+          tar -xOf "candidate/$runtime_archive" yr | sha256sum --check <(printf '%s  -\n' "$EXPECTED_EXECUTABLE_SHA256")
           jq -e \
             --arg commit "$CANDIDATE_COMMIT" \
             --arg tree "$CANDIDATE_TREE" \
             --arg lock "$CARGO_LOCK_SHA256" \
             --arg executable "$EXPECTED_EXECUTABLE_SHA256" \
             --arg bytes "$EXPECTED_EXECUTABLE_BYTES" \
+            --arg runtime_archive "$runtime_archive" \
+            --arg runtime_archive_sha256 "$EXPECTED_RUNTIME_ARCHIVE_SHA256" \
+            --arg runtime_archive_bytes "$EXPECTED_RUNTIME_ARCHIVE_BYTES" \
             --arg target "$TARGET" \
-            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.0.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .target == $target and .executable_sha256 == $executable and .executable_bytes == $bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
+            '.schema_name == "impresari-yara-x-engine-candidate" and .schema_version == "1.1.0" and .source_commit == $commit and .source_tree == $tree and .cargo_lock_sha256 == $lock and .target == $target and .executable_sha256 == $executable and .executable_bytes == $bytes and .runtime_archive == $runtime_archive and .runtime_archive_sha256 == $runtime_archive_sha256 and .runtime_archive_bytes == $runtime_archive_bytes and .features == [] and .production_admitted == false and .safety_claimed == false' \
             candidate/engine-candidate.json >/dev/null
           {
             echo '### Verified retained engine candidate'
             echo "- Artifact ID: \`${{ needs.build.outputs.artifact_id }}\`"
             echo "- Artifact digest: \`${{ needs.build.outputs.artifact_digest }}\`"
             echo "- Executable SHA-256: \`$EXPECTED_EXECUTABLE_SHA256\`"
+            echo "- Runtime archive SHA-256: \`$EXPECTED_RUNTIME_ARCHIVE_SHA256\`"
             echo '- Candidate executed by verifier: `false`'
             echo '- Production admitted: `false`'
           } >> "$GITHUB_STEP_SUMMARY"
