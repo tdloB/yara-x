@@ -60,6 +60,7 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: 1.96.0
+          targets: ${{ env.TARGET }}
 
       - name: Install pinned RustSec client
         run: cargo install cargo-audit --version 0.22.2 --locked
@@ -71,17 +72,19 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
           SOURCE_DATE_EPOCH: "1791158480"
-          RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo build --locked --profile release-lto -p yara-x-cli
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo build --locked --profile release-lto --target "$TARGET" -p yara-x-cli
 
       - name: Smoke test exact executable
         shell: bash
         run: |
           set -euo pipefail
-          test -f target/release-lto/yr
-          test ! -L target/release-lto/yr
-          test "$(file --brief target/release-lto/yr)" = "$(file --brief target/release-lto/yr | sed 's/dynamically linked/statically linked/')"
-          if readelf -l target/release-lto/yr | grep -q 'Requesting program interpreter'; then
+          executable="target/$TARGET/release-lto/yr"
+          test -f "$executable"
+          test ! -L "$executable"
+          test "$(file --brief "$executable")" = "$(file --brief "$executable" | sed 's/dynamically linked/statically linked/')"
+          if readelf -l "$executable" | grep -q 'Requesting program interpreter'; then
             echo 'candidate unexpectedly requires a dynamic program interpreter' >&2
             exit 1
           fi
@@ -93,8 +96,8 @@ jobs:
             '  condition: $marker' \
             '}' > "$scratch/rule.yar"
           printf '%s\n' 'IMPRESARI_CANDIDATE_SMOKE_MARKER' > "$scratch/input"
-          target/release-lto/yr compile --output "$scratch/rules.yarc" "$scratch/rule.yar"
-          target/release-lto/yr scan --compiled-rules --no-mmap --threads 1 --timeout 5 \
+          "$executable" compile --output "$scratch/rules.yarc" "$scratch/rule.yar"
+          "$executable" scan --compiled-rules --no-mmap --threads 1 --timeout 5 \
             --output-format ndjson "$scratch/rules.yarc" "$scratch/input" > "$scratch/result.ndjson"
           ruby -rjson -e '
             rules = File.readlines(ARGV.fetch(0), chomp: true).reject(&:empty?)
@@ -111,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 0755 candidate
-          install -m 0555 target/release-lto/yr candidate/yr
+          install -m 0555 "target/$TARGET/release-lto/yr" candidate/yr
           install -m 0444 LICENSE candidate/LICENSE
           executable_sha256="$(sha256sum candidate/yr | cut -d' ' -f1)"
           executable_bytes="$(wc -c < candidate/yr | tr -d ' ')"
