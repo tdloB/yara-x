@@ -281,16 +281,10 @@ mod test {
         pool.get_or_intern("foo");
         pool.get_or_intern("bar");
 
-        let serialized =
-            bincode::serde::encode_to_vec(&pool, bincode::config::standard())
-                .unwrap();
+        let serialized = postcard::to_stdvec(&pool).unwrap();
 
         let (deserialized, _): (StringPool<u32>, _) =
-            bincode::serde::decode_from_slice(
-                &serialized,
-                bincode::config::standard(),
-            )
-            .unwrap();
+            postcard::take_from_bytes(&serialized).unwrap();
 
         assert_eq!(deserialized.get(0), Some("foo"));
         assert_eq!(deserialized.get(1), Some("bar"));
@@ -304,16 +298,10 @@ mod test {
         pool.get_or_intern("foo");
         pool.get_or_intern("bar");
 
-        let serialized =
-            bincode::serde::encode_to_vec(&pool, bincode::config::standard())
-                .unwrap();
+        let serialized = postcard::to_stdvec(&pool).unwrap();
 
         let (deserialized, _): (BStringPool<u32>, _) =
-            bincode::serde::decode_from_slice(
-                &serialized,
-                bincode::config::standard(),
-            )
-            .unwrap();
+            postcard::take_from_bytes(&serialized).unwrap();
 
         assert_eq!(deserialized.get(0), Some(BStr::new("foo")));
         assert_eq!(deserialized.get(1), Some(BStr::new("bar")));

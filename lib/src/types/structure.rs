@@ -791,6 +791,10 @@ impl Struct {
 
     /// Similar to [`Struct::enum_value`], but returns the enum value as an `i64`
     /// or `None` if it isn't an `i64`.
+    #[allow(
+        dead_code,
+        reason = "used only by modules disabled in the Impresari build"
+    )]
     pub(crate) fn enum_value_i64(
         enum_value_descriptor: &EnumValueDescriptor,
     ) -> Option<i64> {

@@ -326,7 +326,6 @@ annotate-snippets = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 bitflags = { workspace = true, features = ["serde"] }
 bitvec = { workspace = true, features = ["serde"] }
 bstr = { workspace = true, features = ["serde"] }
@@ -360,6 +359,7 @@ num-traits = { workspace = true }
 p384 = { workspace = true, optional = true, features = ["ecdsa"] }
 p256 = { workspace = true, optional = true, features = ["ecdsa"] }
 protobuf = { workspace = true }
+postcard = { workspace = true }
 psl = { workspace = true, optional = true }
 quanta = { workspace = true, optional = true }
 rustc-hash = { workspace = true }

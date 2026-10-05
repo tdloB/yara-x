@@ -12,6 +12,12 @@ test, compatibility, confinement, reproducibility, provenance, and release
 evidence gates defined by Impresari Scan. Exact founder approval remains
 required for a production release.
 
+Dependency assurance is evaluated against the exact normal and build graph of
+the module-free `yara-x-cli` candidate. Cargo's workspace lockfile also retains
+optional dependencies for disabled upstream modules; those findings remain
+visible in the audit output and are excluded only when the machine-generated
+CLI graph proves the exact package version unreachable.
+
 Fork-only changes are limited to dependency remediation, build hardening,
 reproducibility, and admission controls. Patches are removed when upstream
 provides an equivalent fix. The intended end state is to return to an

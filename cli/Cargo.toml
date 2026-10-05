@@ -74,7 +74,11 @@ serde = { workspace = true, features = ["derive"] }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 yansi = { workspace = true }
-yara-x = { workspace = true, default-features = true, features = ["parallel-compilation"] }
+# Impresari's static repository scanner does not admit format modules or
+# parallel compilation. Keeping the CLI on the workspace's explicit core
+# feature set removes unused parsers, crypto, archive expansion, and their
+# dependency surface from the shipped engine candidate.
+yara-x = { workspace = true, default-features = false }
 yara-x-parser = { workspace = true }
 yara-x-proto = { workspace = true }
 yara-x-fmt = { workspace = true }

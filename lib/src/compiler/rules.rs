@@ -35,7 +35,9 @@ const MAGIC: &[u8] = b"YARA-X\0\0";
 ///
 /// This version is incremented every time a change is made to the binary
 /// format in a way that breaks backwards compatibility.
-const SERIALIZATION_VERSION: u32 = 7;
+// Impresari's maintained fork uses postcard instead of the unmaintained
+// bincode codec. Increment the format version so old bytes fail closed.
+const SERIALIZATION_VERSION: u32 = 8;
 
 /// Aho-Corasick automaton bundled with an optional Teddy scanner if the
 /// number of patterns is low enough. If the Teddy scanner is present, and
@@ -324,11 +326,8 @@ impl Rules {
         let start = Instant::now();
 
         // Skip the header and deserialize the remaining data.
-        let (mut rules, _len): (Self, usize) =
-            bincode::serde::decode_from_slice(
-                &bytes[data_offset..],
-                bincode::config::standard(),
-            )?;
+        let (mut rules, _remaining): (Self, _) =
+            postcard::take_from_bytes(&bytes[data_offset..])?;
 
         #[cfg(feature = "logging")]
         info!("Deserialization time: {:?}", Instant::elapsed(&start));
@@ -407,11 +406,7 @@ impl Rules {
         // Write version.
         writer.write_all(&SERIALIZATION_VERSION.to_le_bytes())?;
 
-        bincode::serde::encode_into_std_write(
-            self,
-            &mut writer,
-            bincode::config::standard(),
-        )?;
+        postcard::to_io(self, &mut writer)?;
 
         Ok(())
     }
@@ -647,12 +642,9 @@ impl Rules {
 
     #[inline]
     pub(crate) fn globals(&self) -> types::Struct {
-        let (globals, _): (types::Struct, usize) =
-            bincode::serde::decode_from_slice(
-                self.serialized_globals.as_slice(),
-                bincode::config::standard(),
-            )
-            .expect("error deserializing global variables");
+        let (globals, _): (types::Struct, _) =
+            postcard::take_from_bytes(self.serialized_globals.as_slice())
+                .expect("error deserializing global variables");
         globals
     }
 

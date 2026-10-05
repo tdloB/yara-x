@@ -33,7 +33,7 @@ jobs:
         include:
           - build: msrv
             os: ubuntu-latest
-            rust: 1.95.0
+            rust: 1.96.0
             target: x86_64-unknown-linux-gnu
             args: "--features=magic-module,rules-profiling"
             rust_flags: "-Awarnings"
@@ -195,4 +195,3 @@ jobs:
         run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: ${{ matrix.rust_flags }}
-

@@ -24,15 +24,15 @@ fn serialization() {
 
     // A valid file starts with `MAGIC` and a version number, but the rest of
     // the content is invalid because it is too short. This must produce a
-    // `DecodeError`.
+    // `CodecError`.
     let mut data = Vec::new();
     data.extend(b"YARA-X\0\0");
-    data.extend(7u32.to_le_bytes());
+    data.extend(8u32.to_le_bytes());
     data.extend(b"foo");
 
     assert!(matches!(
         Rules::deserialize(&data).err().unwrap(),
-        SerializationError::DecodeError(_)
+        SerializationError::CodecError(_)
     ));
 
     // This is a valid file, but with a version number that is not the current
